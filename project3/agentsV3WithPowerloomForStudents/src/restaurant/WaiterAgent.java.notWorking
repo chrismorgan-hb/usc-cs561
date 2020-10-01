@@ -1,0 +1,573 @@
+package restaurant;
+import java.awt.Color;
+import restaurant.gui.RestaurantGui;
+import restaurant.layoutGUI.*;
+import agent.Agent;
+import java.util.Timer;
+import java.util.TimerTask;
+import astar.*;
+import java.util.*;
+
+import restaurant.PowerloomHelper;
+import edu.isi.powerloom.*;
+import edu.isi.powerloom.logic.*;
+import edu.isi.stella.Module;
+import edu.isi.stella.javalib.*;
+import edu.isi.stella.Stella_Object;
+
+/** Restaurant Waiter Agent.
+ * Sits customers at assigned tables and takes their orders.
+ * Takes the orders to the cook and then returns them 
+ * when the food is done.  Cleans up the tables after the customers leave.
+ * Interacts with customers, host, and cook */
+public class WaiterAgent extends Agent {
+    private RestaurantGui gui; //Reference to the gui so the customer can send it messages.
+
+   //State variables for Waiter
+    /* private boolean working = true;
+    private boolean onBreak = false;
+    private boolean startedBreak = false;
+    */
+
+    //State constants for Customers
+
+    public enum CustomerState 
+	{NEED_SEATED,READY_TO_ORDER,ORDER_PENDING,ORDER_READY,IS_DONE,NO_ACTION};
+
+    private static String NEED_SEATED = "NEED_SEATED";
+    private static String READY_TO_ORDER = "READY_TO_ORDER";
+    private static String ORDER_PENDING = "ORDER_PENDING";
+    private static String ORDER_READY = "ORDER_READY";
+    private static String IS_DONE = "IS_DONE";
+    private static String NO_ACTION = "NO_ACTION";
+ 
+    Timer timer = new Timer();
+
+    /** Private class to hold information for each customer.
+     * Contains a reference to the customer, his choice, 
+     * table number, and state */
+    private class MyCustomer {
+	public CustomerState state;
+	public CustomerAgent cmr;
+	public String choice;
+	public int tableNum;
+	public Food food; //gui thing
+
+	/** Constructor for MyCustomer class.
+	 * @param cmr reference to customer
+	 * @param num assigned table number */
+	public MyCustomer(CustomerAgent cmr, int num){
+	    this.cmr = cmr;
+	    tableNum = num;
+	    state = CustomerState.NO_ACTION;
+	    PLI.sAssertProposition("(WaitersViewOfCustomer " + cmr.loomInstance + " " + NO_ACTION + ")",
+				PowerloomHelper.getWorkingModule(), null); 
+	}
+    }
+
+    //Name of waiter
+    private String name;
+
+    String loomInstance;
+    //All the customers that this waiter is serving
+    private List<MyCustomer> customers = new ArrayList<MyCustomer>();
+
+    private HostAgent host;
+    private CookAgent cook;
+    AStarTraversal aStar;
+    Restaurant restaurant; //the gui layout
+    Waiter waiter; //the gui object
+    Position currentPosition;
+    Position originalPosition;
+    Table[] tables; //the gui tables
+    
+
+    /** Constructor for WaiterAgent class
+     * @param name name of waiter
+     * @param gui reference to the gui */
+    public WaiterAgent(String name, RestaurantGui gui, AStarTraversal aStar,
+		       Restaurant restaurant, Table[] tables) {
+	super();
+	this.gui = gui;//main gui
+	this.name = name;
+	this.aStar = aStar;
+	this.restaurant = restaurant;//the layout for astar
+	waiter = new Waiter(name.substring(0,2), new Color(255, 0, 0), restaurant);
+	//currentPosition = new Position(3,13);
+	currentPosition = new Position(waiter.getX(), waiter.getY());
+	currentPosition.moveInto(aStar.getGrid());
+	originalPosition = currentPosition;//save this for moving into
+	this.tables = tables;
+
+	String query =
+           "1 (?person)(and (person ?person)(hasname ?person \"" + name+"\"))";
+        loomInstance = PowerloomHelper.retrieve1(query);
+        if (loomInstance!=null){
+            PowerloomHelper.getloomMap().put(loomInstance, this);
+            System.out.println("Found person in knowledge base: " + loomInstance);
+        }
+        else {
+	        System.out.println("No waiter found. Instantiating...");
+	        loomInstance = PowerloomHelper.instantiate("person",this);//puts it in map
+
+		String h = PowerloomHelper.instantiate("home",null);
+       		query = "(and (workingWaiter " + loomInstance + ")"
+			+"(haslocation " +h+" "+gui.getneighborhoodInstance()
+                	+") (lives "+ loomInstance+" "+h+")(hasname "
+                	+ loomInstance+" \""+name+"\"))";
+        	print("asserting facts about new instance:"+query);
+        	PLI.sAssertProposition(query, PowerloomHelper.getWorkingModule(), null);
+        }
+    } 
+
+    // *** MESSAGES ***
+
+    /** Host sends this to give the waiter a new customer.
+     * @param customer customer who needs seated.
+     * @param tableNum identification number for table */
+    public void msgSitCustomerAtTable(CustomerAgent customer, int tableNum){
+	print("Seating " + customer + " at table" + (tableNum+1));
+	MyCustomer c = new MyCustomer(customer, tableNum);
+	c.state = CustomerState.NEED_SEATED;
+	PLI.sAssertProposition("(WaitersViewOfCustomer " + customer.loomInstance + " " + NEED_SEATED + ")",
+				PowerloomHelper.getWorkingModule(), null); 
+	customers.add(c);
+	stateChanged();
+    }
+
+    /** Customer sends this when they are ready.
+     * @param customer customer who is ready to order.
+     */
+    public void msgImReadyToOrder(CustomerAgent customer){
+	//print("received msgImReadyToOrder from:"+customer);
+	for(int i=0; i < customers.size(); i++){
+	    //if(customers.get(i).cmr.equals(customer)){
+	    if (customers.get(i).cmr == customer){
+		// customers.get(i).state = CustomerState.READY_TO_ORDER;
+	 	PLI.sAssertProposition("(WaitersViewOfCustomer " + customer.loomInstance + " " + READY_TO_ORDER + ")",
+                                PowerloomHelper.getWorkingModule(), null);
+		stateChanged();
+		return;
+	    }
+	}
+	System.out.println("msgImReadyToOrder in WaiterAgent, didn't find him?");
+    }
+
+    /** Customer sends this when they have decided what they wanted to eat 
+     * @param customer customer who has decided their choice
+     * @param choice the food item that the customer chose */
+    public void msgHereIsMyChoice(CustomerAgent customer, String choice){
+	for(MyCustomer c:customers){
+	    if(c.cmr.equals(customer)){
+		c.choice = choice;
+		// c.state = CustomerState.ORDER_PENDING;
+		PLI.sAssertProposition("(WaitersViewOfCustomer " + customer.loomInstance + " " + ORDER_PENDING + ")",
+                                PowerloomHelper.getWorkingModule(), null);
+
+		tables[c.tableNum].takeOrder(choice.substring(0,2)+"?");
+		stateChanged();
+		return;
+	    }
+	}
+    }
+
+    /** Cook sends this when the order is ready.
+     * @param tableNum identification number of table whose food is ready */
+    public void msgOrderIsReady(int tableNum, Food f){
+	for(MyCustomer c:customers){
+	    if(c.tableNum == tableNum){
+		// c.state = CustomerState.ORDER_READY;
+		PLI.sAssertProposition("(WaitersViewOfCustomer " + c.cmr.loomInstance + " " + ORDER_READY + ")",
+                                PowerloomHelper.getWorkingModule(), null);
+	
+		c.food = f;
+		stateChanged();
+		return;
+	    }
+	}
+    }
+
+    /** Customer sends this when they are done eating.
+     * @param customer customer who is leaving the restaurant. */
+    public void msgDoneEatingAndLeaving(CustomerAgent customer){
+	for(MyCustomer c:customers){
+	    if(c.cmr.equals(customer)){
+		// c.state = CustomerState.IS_DONE;
+		PLI.sAssertProposition("(WaitersViewOfCustomer " + customer.loomInstance + " " + IS_DONE + ")",
+                                PowerloomHelper.getWorkingModule(), null);
+
+		c.food.remove();
+		PLI.sRetractProposition("(hasAssignment " + loomInstance + " " + customer.loomInstance + ")",
+					PowerloomHelper.getWorkingModule(), null);
+		stateChanged();
+		return;
+	    }
+	}
+    }
+
+    /** Sent from GUI to control breaks 
+     * @param state true when the waiter should go on break and 
+     *              false when the watier should go off break */
+    public void setBreakStatus(boolean state){
+	// onBreak = state;
+	if (state) {
+		PLI.sAssertProposition("(onBreakWaiter " + loomInstance + ")",
+					PowerloomHelper.getWorkingModule(), null);
+	}
+	else {
+		PLI.sRetractProposition("(onBreakWaiter " + loomInstance + ")",
+					PowerloomHelper.getWorkingModule(), null);
+	}
+	stateChanged();
+    }
+
+
+
+    /** Scheduler.  Determine what action is called for, and do it. */
+    protected boolean pickAndExecuteAnAction() {
+	//print("in waiter scheduler");
+	//Starts the break cycle if onBreak == true
+	if( PowerloomHelper.ask("(and (onBreakWaiter " + loomInstance + ") (workingWaiter " + loomInstance + "))") ) {
+	    initiateBreak();
+	    return true;
+	}
+
+	//Once all the customers have been served
+	//then the waiter can actually go on break
+	if( !PowerloomHelper.ask("(workingWaiter " + loomInstance + ")") && 
+		customers.isEmpty() && 
+		!PowerloomHelper.ask("(startedBreakWaiter " + loomInstance + ")") ) {
+	    goOnBreak();
+	    return true;
+	}
+
+	if( !PowerloomHelper.ask("(onBreakWaiter " + loomInstance + ")") && 
+		!PowerloomHelper.ask("(workingWaiter " + loomInstance + ")") ){
+	    endBreak();
+	}
+
+	
+	//Runs through the customers for each rule, so 
+	//the waiter doesn't serve only one customer at a time
+	PlIterator cIter;
+	cIter = PLI.sRetrieve("all (?c) (hasAssignment " + loomInstance + " ?c)",
+				PowerloomHelper.getWorkingModule(), null);
+
+	    //System.out.println("in scheduler, customers not empty:");
+
+	    //Gives food to customer if the order is ready
+	    //while(cIter.nextP()) { 
+            for(MyCustomer c:customers){
+		//String cState = PowerloomHelper.retrieve1(
+		//	("1 (?cs) (WaitersViewOfCustomer " + PLI.getNthString(cIter, 0, null, null) + " ?cs)"));
+
+		if(c.state == CustomerState.ORDER_READY) {
+                //if(cState.equals(ORDER_READY)) {
+		    //CustomerAgent c = (CustomerAgent)PowerloomHelper.getloomMap().get(PLI.getNthString(cIter, 0, null, null));
+                    giveFoodToCustomer(c);
+                    return true;
+                }
+            }
+
+	    cIter = PLI.sRetrieve("all (?c) (hasAssignment " + loomInstance + " ?c)",
+				PowerloomHelper.getWorkingModule(), null);
+            //Clears the table if the customer has left
+	    while(cIter.nextP()) {
+            //for(MyCustomer c:customers){
+		String cState = PowerloomHelper.retrieve1(
+			("1 (?cs) (WaitersViewOfCustomer " + PLI.getNthString(cIter, 0, null, null) + " ?cs)"));
+
+                if(cState.equals(IS_DONE)) {
+		    CustomerAgent c = (CustomerAgent)PowerloomHelper.getloomMap().get(PLI.getNthString(cIter, 0, null, null));
+                    clearTable(c);
+                    return true;
+                }
+            }
+
+	    cIter = PLI.sRetrieve("all (?c) (hasAssignment " + loomInstance + " ?c)",
+				PowerloomHelper.getWorkingModule(), null);
+            //Seats the customer if they need it
+	    while(cIter.nextP()) {
+            //for(MyCustomer c:customers){
+		String cState = PowerloomHelper.retrieve1(
+			("1 (?cs) (WaitersViewOfCustomer " + PLI.getNthString(cIter, 0, null, null) + " ?cs)"));
+
+                if(cState.equals(NEED_SEATED)){
+		    CustomerAgent c = (CustomerAgent)PowerloomHelper.getloomMap().get(PLI.getNthString(cIter, 0, null, null));
+                    seatCustomer(c);
+                    return true;
+                }
+            } 
+
+	    cIter = PLI.sRetrieve("all (?c) (hasAssignment " + loomInstance + " ?c)",
+				PowerloomHelper.getWorkingModule(), null);
+            //Gives all pending orders to the cook
+	    //while(cIter.nextP()) {
+            for(MyCustomer c:customers){
+		String cState = PowerloomHelper.retrieve1(
+			("1 (?cs) (WaitersViewOfCustomer " + PLI.getNthString(cIter, 0, null, null) + " ?cs)"));
+
+                if(cState.equals(ORDER_PENDING)){
+		    //CustomerAgent c = (CustomerAgent)PowerloomHelper.getloomMap().get(PLI.getNthString(cIter, 0, null, null));
+                    giveOrderToCook(c);
+                    return true;
+                }
+            }
+
+	    cIter = PLI.sRetrieve("all (?c) (hasAssignment " + loomInstance + " ?c)",
+				PowerloomHelper.getWorkingModule(), null);
+            //Takes new orders for customers that are ready
+	    while(cIter.nextP()) {
+            //for(MyCustomer c:customers){
+		String cState = PowerloomHelper.retrieve1(
+			("1 (?cs) (WaitersViewOfCustomer " + PLI.getNthString(cIter, 0, null, null) + " ?cs)"));
+
+                if(cState.equals(READY_TO_ORDER)) {
+		    CustomerAgent c = (CustomerAgent)PowerloomHelper.getloomMap().get(PLI.getNthString(cIter, 0, null, null));
+                    takeOrder(c);
+                    return true;
+                }
+            }      
+	//}
+	if (!currentPosition.equals(originalPosition)) {
+	    moveToOriginalPosition();
+	    return true;
+	}
+
+	//we have tried all our rules and found nothing to do. 
+	// So return false to main loop of abstract agent and wait.
+	//print("in scheduler, no rules matched:");
+	return false;
+    }
+
+    // *** ACTIONS ***
+    
+    /** Starts the break so that the host won't give
+     * any new customers to this waiter */
+    private void initiateBreak(){
+	Do("Starting to go on break");
+	host.msgChangeWorkStatus(this, false);
+	//working = false;
+	PLI.sRetractProposition("(workingWaiter " + loomInstance + ")",
+				PowerloomHelper.getWorkingModule(), null);
+	stateChanged();
+    }
+
+    /** Goes on break once all customers are gone.
+     * Starts a break timer. */
+    private void goOnBreak(){
+	Do("Going on break");
+	// startedBreak = true;
+	PLI.sAssertProposition("(startedBreakWaiter " + loomInstance + ")",
+				PowerloomHelper.getWorkingModule(), null);
+	stateChanged();
+    }
+
+    /** Brings the waiter back from break */
+    private void endBreak(){
+	Do(name + " is back from break!");
+	host.msgChangeWorkStatus(this, true);
+	// working = true;
+	PLI.sAssertProposition("(workingWaiter " + loomInstance + ")", 
+				PowerloomHelper.getWorkingModule(), null);
+	//onBreak = false;
+	//startedBreak = false;
+
+	PLI.sRetractProposition("(onBreakWaiter " + loomInstance + ")",
+				PowerloomHelper.getWorkingModule(), null);
+	PLI.sRetractProposition("(startedBreakWaiter " + loomInstance + ")",
+				PowerloomHelper.getWorkingModule(), null);
+
+	//Commented out for gui
+	//startBreakTimer(15000);
+    }
+
+    /** Seats the customer at a specific table 
+     * @param customer customer that needs seated */
+    private void seatCustomer(CustomerAgent customer) {
+	int myTableInst = PLI.getNthInteger((PLI.sRetrieve(("1 (?t) (occupiedBy ?t " + customer.loomInstance + ")"), 
+				PowerloomHelper.getWorkingModule(), null)), 0, null, null);
+	//Notice how we print "customer" directly. It's toString method will do it.
+	Do("Seating " + customer + " at table " + (myTableInst+1));
+	//move to customer first.
+	Customer guiCustomer = customer.getGuiCustomer();
+	guiMoveFromCurrentPostionTo(new Position(guiCustomer.getX()+1,guiCustomer.getY()));
+	waiter.pickUpCustomer(guiCustomer);
+	Position tablePos = new Position(tables[myTableInst].getX()-1,
+					 tables[myTableInst].getY()+1);
+	guiMoveFromCurrentPostionTo(tablePos);
+	waiter.seatCustomer(tables[myTableInst]);
+	// customer.state = CustomerState.NO_ACTION;
+	PLI.sAssertProposition("(WaitersViewOfCustomer " + customer.loomInstance + " " + NO_ACTION + ")",
+				PowerloomHelper.getWorkingModule(), null); 
+	customer.msgFollowMeToTable(this, new Menu());
+	stateChanged();
+    }
+    //this is just a subroutine for waiter moves. It's not an "Action"
+    //itself, it is called by Actions.
+    void guiMoveFromCurrentPostionTo(Position to){
+	boolean pathTaken = false;
+	while (!pathTaken) {
+	    pathTaken = true;
+	    //print("A* search from " + currentPosition + "to "+to);
+	    AStarNode a = (AStarNode)aStar.generalSearch(currentPosition,to);
+	    if (a == null) {//generally won't happen. A* will run out of space first.
+		System.out.println("no path found. What should we do?");
+		break; //dw for now
+	    }
+	    //dw coming. Get the table position for table 4 from the gui
+	    //now we have a path. We should try to move there
+	    List<Position> ps = a.getPath();
+	    Do("Moving to position " + to + " via " + ps);
+	    for (int i=1; i<ps.size();i++){//i=0 is where we are
+		//we will try to move to each position from where we are.
+		//this should work unless someone has moved into our way
+		//during our calculation. This could easily happen. If it
+		//does we need to recompute another A* on the fly.
+		Position next = ps.get(i);
+		if (next.moveInto(aStar.getGrid())){
+		    //tell the layout gui
+		    waiter.move(next.getX(),next.getY());
+		    currentPosition.release(aStar.getGrid());
+		    currentPosition = next;
+		}
+		else {
+		    System.out.println("going to break out path-moving");
+		    pathTaken = false;
+		    break;
+		}
+	    }
+	}
+    }
+    
+    /** Takes down the customers order 
+     * @param customer customer that is ready to order */
+    private void takeOrder(CustomerAgent customer) {
+	Do("Taking " + customer +"'s order.");
+	int myTableInst = PLI.getNthInteger((PLI.sRetrieve(("1 (?t) (occupiedBy ?t " + customer.loomInstance + ")"), 
+				PowerloomHelper.getWorkingModule(), null)), 0, null, null);
+	Position tablePos = new Position(tables[myTableInst].getX()-1,
+					 tables[myTableInst].getY()+1);
+	guiMoveFromCurrentPostionTo(tablePos);
+	// customer.state = CustomerState.NO_ACTION;
+	PLI.sAssertProposition("(WaitersViewOfCustomer " + customer.loomInstance + " " + NO_ACTION + ")",
+				PowerloomHelper.getWorkingModule(), null); 
+	customer.msgWhatWouldYouLike();
+	stateChanged();
+    }
+
+    /** Gives any pending orders to the cook 
+     * @param customer customer that needs food cooked */
+    private void giveOrderToCook(MyCustomer customer) {
+	Do("Giving " + customer.cmr + "'s choice of " + customer.choice + " to cook");
+	// customer.state = CustomerState.NO_ACTION;
+	PLI.sAssertProposition("(WaitersViewOfCustomer " + customer.cmr.loomInstance + " " + NO_ACTION + ")",
+				PowerloomHelper.getWorkingModule(), null); 
+	cook.msgHereIsAnOrder(this, customer.tableNum, customer.choice);
+	stateChanged();
+    }
+
+    /** Gives food to the customer 
+     * @param customer customer whose food is ready */
+    private void giveFoodToCustomer(MyCustomer customer) {
+	Do("Giving finished order of " + customer.choice +" to " + customer.cmr);
+	Position inFrontOfGrill = new Position(customer.food.getX()-1,customer.food.getY());
+	guiMoveFromCurrentPostionTo(inFrontOfGrill);//in front of grill
+	waiter.pickUpFood(customer.food);
+	Position tablePos = new Position(tables[customer.tableNum].getX()-1,
+					 tables[customer.tableNum].getY()+1);
+	guiMoveFromCurrentPostionTo(tablePos);
+	waiter.serveFood(tables[customer.tableNum]);
+	// customer.state = CustomerState.NO_ACTION;
+	PLI.sAssertProposition("(WaitersViewOfCustomer " + customer.cmr.loomInstance + " " + NO_ACTION + ")",
+				PowerloomHelper.getWorkingModule(), null); 
+	customer.cmr.msgHereIsYourFood(customer.choice);
+	stateChanged();
+    }
+    private void moveToOriginalPosition(){
+	Do("Nothing to do. Moving to original position="+originalPosition);
+	guiMoveFromCurrentPostionTo(originalPosition);
+	stateChanged();
+    }
+
+
+    /** Starts a timer to clear the table 
+     * @param customer customer whose table needs cleared */
+    private void clearTable(final CustomerAgent customer) {
+	int myTableInst = PLI.getNthInteger((PLI.sRetrieve(("1 (?t) (occupiedBy ?t " + customer.loomInstance + ")"), 
+				PowerloomHelper.getWorkingModule(), null)), 0, null, null);
+	Do("Clearing table " + (myTableInst+1) + " (2500 milliseconds)");
+	timer.schedule(new TimerTask(){
+	    public void run(){		    
+		endCustomer(customer);
+	    }
+	}, 2500);
+	   
+	// customer.state = CustomerState.NO_ACTION;
+	PLI.sAssertProposition("(WaitersViewOfCustomer " + customer.loomInstance + " " + NO_ACTION + ")",
+				PowerloomHelper.getWorkingModule(), null); 
+	stateChanged();
+    }
+
+
+    /** Function called at the end of the clear table timer
+     * to officially remove the customer from the waiter's list.
+     * @param customer customer who needs removed from list */
+    private void endCustomer(CustomerAgent customer){ 
+	int myTableInst = PLI.getNthInteger((PLI.sRetrieve(("1 (?t) (occupiedBy ?t " + customer.loomInstance + ")"), 
+				PowerloomHelper.getWorkingModule(), null)), 0, null, null);
+
+	Do("Table " + (myTableInst+1) + " is cleared!");
+	host.msgTableIsFree(myTableInst);
+	//customers.remove(customer);
+	stateChanged();
+    }
+
+
+
+
+    /*
+    //This timer controls the time in between breaks
+    //This is a hack since we don't have a gui to control
+    //when the waiter should go on break
+    public void startBreakTimer(int time){
+	TimerQueue.schedule(Deadline.in(time),
+			    new TimerQueue.Callback() {
+				public void timerExpired(Object cookie) {
+				    timeForBreak();
+				    stateChanged();
+				}},
+			    null);
+    }
+    */
+
+    // *** EXTRA ***
+
+    /** @return name of waiter */
+    public String getName(){
+        return name;
+    }
+
+    /** @return string representation of waiter */
+    public String toString(){
+	return "waiter " + getName();
+    }
+    
+    /** Hack to set the cook for the waiter */
+    public void setCook(CookAgent cook){
+	this.cook = cook;
+    }
+    
+    /** Hack to set the host for the waiter */
+    public void setHost(HostAgent host){
+	this.host = host;
+    }
+
+    /** @return true if the waiter is on break, false otherwise */
+    /* public boolean isOnBreak(){
+	return onBreak;
+    }
+    */
+
+}
+

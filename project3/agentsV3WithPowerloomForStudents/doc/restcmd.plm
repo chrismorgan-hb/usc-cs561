@@ -1,0 +1,72 @@
+;;; -*- Mode: Lisp; Package: STELLA; Syntax: COMMON-LISP; Base: 10 -*-
+
+;;(load-file "restaurant.plm")
+;;(load-file "/auto/home-scf-29/stinzel/cs561/project3/restaurant.plm")
+(load-file "D:/USC-12-21-2004/CS561-AI/Agents/agentsV3WithPowerloom/doc/restaurant.plm")
+;;(demo "D:/USC-12-21-2004/CS561-AI/Agents/agentsV3WithPowerloom/doc/restcmd.plm")
+(in-module "restaurant")
+(set-feature justifications)
+
+;(retrieve all ?x ( ?x))
+(retrieve all ?x (location ?x))
+(retrieve all ?x (neighborhood ?x))
+(retrieve all ?x (address ?x))
+(retrieve all ?x (thingWithLocation ?x))
+(retrieve all ?x (company ?x))
+(retrieve all ?x (home ?x))
+(retrieve all ?x (area ?x))
+(retrieve all ?x (bedroom ?x))
+(retrieve all ?x (kitchen ?x))
+(retrieve all ?x (appliance ?x))
+(retrieve all ?x (stove ?x))
+(retrieve all ?x (refrigerator ?x))
+(retrieve all ?x (food ?x))
+
+(retrieve all ?x (company ?x))
+(retrieve all ?x (serviceCompany ?x))
+(retrieve all ?x (productCompany ?x))
+(retrieve all ?x (product ?x))
+(retrieve all ?x (somethingOfValue ?x))
+(retrieve all ?x (service ?x))
+(retrieve all ?x (restaurant ?x))
+
+(retrieve all ?x (employee ?x))
+
+
+(retrieve all ?x (workingWaiter ?x))
+(retrieve all ?x (waitingCustomer ?x))
+(retrieve all ?x (emptyTable ?x))
+(retrieve all ?x (occupiedTable ?x))
+
+(retrieve all ?x (mesa ?x))
+(retrieve all ?x (foodAtHome ?x))
+
+(retrieve all ?x (person ?x))
+(retrieve all ?x (atHome ?x))
+(retrieve all ?x (eatAtHome ?x))
+
+;(retrieve all (?x ?y) ( ?x ?y))
+(retrieve all (?x ?y) (hasLocation ?x ?y))
+(retrieve all (?x ?y) (hasAppliance ?x ?y))
+(retrieve all (?x ?y) (hasFood ?x ?y))
+(retrieve all (?x ?y) (hasArea ?x ?y))
+(retrieve all (?x) (hungry ?x))
+
+(retrieve all (?x ?y) (isAt ?x ?y))
+
+(retrieve all (?x ?y) (client ?x ?y))
+
+(retrieve all (?x ?y) (hasProduct ?x ?y))
+(retrieve all (?x ?y) (hasService ?x ?y))
+(retrieve all (?x ?y) (hasSomethingToOffer ?x ?y))
+
+(retrieve all (?x ?y) (restaurantNearby ?x ?y))
+
+(retrieve all (?x) (and (person ?x) (hungry ?x)))
+(retrieve all (?x) (and (person ?x) (fail (hungry ?x))))
+
+(ask (hungry joe))
+(ask (hungry jane))
+
+
+;;(load-file "restaurant.plm")

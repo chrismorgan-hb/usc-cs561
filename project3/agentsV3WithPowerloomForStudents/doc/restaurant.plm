@@ -1,0 +1,274 @@
+;;; -*- Mode: Lisp; Package: STELLA; Syntax: COMMON-LISP; Base: 10 -*-
+
+;;; Powerloom file for csci561 Fall2006 project3.
+
+;;; Author: Jon L. Stinzel
+;;; 
+;;; Usage: (load-file "/fullPathToFile/restaurant.plm")
+;;;        (in-module "restaurant")
+;;;
+;;; 
+;;; Queries to test: See queries at end of file
+
+(defmodule "restaurant"
+ :documentation "Module based on government.htm for csci561 Fall2006 project3."
+ :includes ("PL-USER"))
+
+(in-module "restaurant")
+
+;;; clear any info from previous runs:
+(clear-module "restaurant")
+(reset-features)
+
+(IN-DIALECT :KIF)
+
+;;; Concepts and Relations
+
+;;; Things with location
+(defconcept location)
+(defconcept neighborhood (location))
+(defconcept address (location))
+
+(defconcept thingWithLocation)
+(defrelation hasLocation ((?x thingWithLocation) (?l location)))
+
+(defconcept home (thingWithLocation))
+(defconcept area) 
+(defconcept bedroom (area))
+(defconcept kitchen (area))
+
+(defrelation hasArea ((?x home) (?a area)))
+
+(defconcept appliance)
+(defconcept stove (appliance))
+(defconcept refrigerator (appliance))
+(defrelation hasAppliance ((?k kitchen) (?a appliance)))
+
+(defconcept food)
+(defrelation hasFood ((?r refrigerator) (?f food)))
+
+;;; Companies
+(defconcept company (thingWithLocation))
+
+(defconcept serviceCompany (company))
+(defconcept productCompany (company))
+
+(defconcept somethingOfValue)
+(defconcept service (somethingOfValue))
+(defconcept product (somethingOfValue))
+
+(defconcept employee)
+(defrelation hasEmployee ((?x company) (?y employee)))
+(defrelation hasSomethingToOffer ((?x company) (?y somethingOfValue)))
+
+(defrelation hasProduct ((?x productCompany) (?y product))
+  :=> (hasSomethingToOffer ?x ?y))
+(defrule hasProductRule 
+  (=> (and (hasSomethingToOffer ?x ?y)(product ?y))
+      (and (productCompany ?x)(hasProduct ?x ?y))))
+
+(defrelation hasService ((?x serviceCompany) (?y service))
+  :=> (AND (hasSomethingToOffer ?x ?y)))
+(defrule hasServiceRule 
+  (=> (and (hasSomethingToOffer ?x ?y)(service ?y))
+      (and (serviceCompany ?x)(hasService ?x ?y))))
+
+(defconcept feedingTheHungry (service))
+
+(defconcept restaurant (?x)
+  :<=> (AND (serviceCompany ?x)
+            (exists (?y) (AND (feedingTheHungry ?y) (hasService ?x ?y)))))
+
+;;; personage
+(defconcept person)
+
+(defrelation hasName (?x (?name STRING)))
+(defrelation isAt ((?p person) (?t thingWithLocation)))
+(assert (closed isAt))
+(defrelation hungry ((?p person)))
+(defrelation lives ((?p person) (?h home)))
+
+(defconcept AgentState)
+
+(defconcept customer (person))
+(defrelation waiting ((?c customer)))
+(defconcept CustomerState (?s)
+ :<=>(member-of ?s (setof NEED_SEATED NEED_DECIDE NEED_ORDER NEED_EAT NEED_LEAVE NO_ACTION)))
+;(defconcept CustomerState (?s)
+;:<=> (and (AgentState ?s)
+;(member-of ?s (set-of NEED_SEATED NEED_DECIDE NEED_ORDER NEED_EAT NEED_LEAVE NO_ACTION))))
+(deffunction hasCustomerState ((?c customer) (?s customerState)))
+
+(defconcept wCustomerState (?s)
+ :<=>(member-of ?s (setof NEED_SEATED READY_TO_ORDER ORDER_PENDING ORDER_READY IS_DONE NO_ACTION)))
+
+(deffunction WaitersViewOfCustomer ((?c customer) (?s wCustomerState)))
+
+;;; employees
+(defconcept employee)
+
+(defrelation working ((?e employee)))
+(defrelation onBreak ((?e employee)))
+(defrelation startedBreak ((?e employee)))
+
+(defconcept busboy (employee))
+(defconcept cashier (employee))
+(defconcept cook (employee))
+(defconcept waiter (employee))
+(defconcept host (employee))
+
+(defrelation client (?x ?c)
+ :<= (exists (?a)(AND (employee ?x)
+		  (hasAssignment ?x ?a) 
+		  (assignment ?a)
+		  (identifies ?a ?c)))
+)
+
+(defrelation manages ((?h host) (?w waiter)))
+
+(defconcept mesa)
+(defrelation allocates ((?h host) (?t mesa)))
+(defrelation occupiedBy ((?t mesa) (?c customer)))
+
+;;; assignments
+(defconcept assignment)
+
+(defrelation identifies ((?a assignment) ?c))
+(defrelation hasAssignment ((?e employee) (?a assignment)))
+
+(defrelation hasOrder ((?c cook) (?fo foodOrder))
+  :=> (hasAssignment ?c ?fo))
+
+(defconcept foodOrder (?a)
+ :<=> (AND (assignment ?a)
+           (exists (?c) (AND (waiter ?c) 
+                             (identifies ?a ?c)))))
+
+(defconcept customerAssignment (?a)
+ :<=> (AND (assignment ?a)
+           (exists (?c) (AND (customer ?c) 
+                             (identifies ?a ?c)))))
+
+;(defrelation server ((?f foodOrder) (?w waiter)))
+(defrelation destination (?x (?t mesa)))
+
+;;; food
+(defconcept food)
+(defconcept pizza (food))
+(defconcept steak (food))
+(defconcept salad (food))
+(defconcept chicken (food))
+
+(defrelation choice (?x (?f food)))
+
+(defrelation restaurantNearby ((?p person) (?r restaurant))
+  :<=> (exists (?h ?l)
+               (AND (person ?p) 
+                    (lives ?p ?h)
+                    (home ?h)
+                    (hasLocation ?h ?l)
+                    (neighborhood ?l)
+                    (restaurant ?r)
+                    (hasLocation ?r ?l))))
+
+(defrelation atHome ((?p person))
+  :<=> (exists (?h) 
+               (AND (home ?h)
+                    (isAt ?p ?h))))
+
+(defconcept foodAtHome ((?h home))
+  :<=> (exists (?k ?r ?f) 
+               (AND (hasArea ?h ?k)
+                    (kitchen ?k)
+                    (hasAppliance ?k ?r)
+                    (hasFood ?r ?f))))
+
+(defrelation hasRefrigerator ((?p person) (?refrig refrigerator))
+  :<=> (exists (?h ?k)
+	       (and (lives ?p ?h)
+		    (hasArea ?h ?k)
+		    (kitchen ?k)
+		    (hasAppliance ?k ?refrig)))) 
+
+(defrelation eatAtHome ((?p person))
+  :<=> (exists (?h) 
+               (AND (hungry ?p)
+                    (lives ?p ?h)
+                    (atHome ?p)
+                    (foodAtHome ?h))))
+
+(defconcept waitingCustomer (?c)
+ :<=> (AND (customer ?c)
+           (waiting ?c)))
+
+(defconcept workingWaiter (?w)
+ :<=> (AND (waiter ?w)
+           (working ?w)))
+
+(defconcept onBreakWaiter (?w)
+ :<=> (AND (waiter ?w)
+	   (onBreak ?w)))
+
+(defconcept startedBreakWaiter (?w)
+ :<=> (AND (waiter ?w)
+	   (startedBreakWaiter ?w)))
+
+(defconcept occupiedTable (?t)
+  :<=> (AND (mesa ?t)
+            (exists (?c) (occupiedBy ?t ?c))))
+
+(defconcept emptyTable (?t)
+  :<=> (AND (mesa ?t)
+            (fail (exists (?c) (occupiedBy ?t ?c)))))
+
+(process-definitions)
+
+;;; Some assertions of relationships and facts
+
+; A company only
+(assert (hasSomethingToOffer acme acmeStuff))
+
+; A product company
+(assert (hasProduct sap software))
+
+; A service company
+(assert (hasService jiffyLube jlOilChange))
+
+; A complany only
+(assert (hasEmployee starbucks JoeBarista))
+
+; Restaurants
+(assert (hasService guidos srvcOfGuidos))
+(assert (feedingTheHungry srvcOfGuidos ))
+(assert (hasLocation guidos northBeach))
+(assert (neighborhood northBeach))
+
+(assert (hasService dennys srvcOfDennys))
+(assert (feedingTheHungry srvcOfDennys))
+(assert (hasLocation  dennys nobHill))
+(assert (neighborhood nobHill))
+
+(assert (hasname joe "joe"))
+(assert (lives joe joesHouse))
+(assert (isAt joe joesHouse))
+(assert (hasLocation joesHouse northBeach))
+
+(assert (hasname jane "jane"))
+(assert (lives jane janesHouse))
+(assert (hasLocation janesHouse northBeach))
+
+(assert (hasname steve "steve"))
+(assert (lives steve stevesHouse))
+(assert (hasLocation stevesHouse southSide))
+(assert (neighborhood southSide))
+(assert (hasArea stevesHouse stevesKitchen))
+(assert (hasAppliance stevesKitchen stevesFridge))
+(assert (hasFood stevesFridge steak))
+(assert (hasFood stevesFridge chicken))
+(assert (isAt steve stevesHouse))
+
+(assert (hasname jim "jim"))
+(assert (lives jim homeOfJim))
+(assert (hasAppliance kOfJim fridgeOfJim)) 
+(assert (hasArea homeOfJim kOfJim)) 
+(assert (hasLocation homeOfJim southSide)) 

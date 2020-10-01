@@ -1,0 +1,203 @@
+;;; -*- Mode: Lisp; Package: STELLA; Syntax: COMMON-LISP; Base: 10 -*-
+; Christopher Morgan
+; CSCI 561 Project 2 - Powerloom
+; See bottom for queries
+; Using OWA, so UNKNOWN will be returned, not FALSE
+
+(CL:IN-PACKAGE "STELLA")
+(IN-MODULE "/PL-KERNEL-KB/PL-USER")
+(IN-DIALECT :KIF)
+
+(clear-module "PL-USER")
+(set-feature justifications)
+
+(defconcept people (?p)
+  :<=> (or (exists ?a (and (anarchy ?a)(for ?a ?p)))
+	(exists ?s (and (state ?s)(hasP ?s ?p)))
+	(exists ?d (and (democracy ?d)(of ?d ?p)(for ?d ?p)(by ?d ?p)))
+	(exists ?t (and (theocracy ?t)(for ?t ?p)))
+	(exists ?g (and (goodCommunism ?g)(for ?g ?p))))) 
+
+(defconcept boundary (?b)
+  :<=> (exists ?s (and (state ?s)(hasB ?s ?b))))
+
+(defconcept noRules (?nr)
+  :<=> (exists ?a (and (anarchy ?a)(hasRules ?a ?nr))))
+
+(defconcept law (?l)
+  :<=> (exists ?cd (and (constitutionalDemocracy ?cd)(hasRules ?cd ?l))))
+
+(defconcept familyMembers (?fm)
+  :<=> (exists ?f (and (family ?f)(for ?f ?fm))))
+
+(defconcept dictator (?d)
+  :<=> (exists ?di (and (dictatorship ?di)(of ?di ?d)(for ?di ?d)(by ?di ?d))))
+
+(defconcept marxism (?m)
+  :<=> (exists ?s (and (socialism ?s)(implements ?s ?m))))
+
+(defconcept capitalism (?c)
+  :<=> (exists ?fm (and (freeMarket ?fm)(implements ?fm ?c))))
+
+(defconcept state)
+
+(defconcept sovereignState(?s state)
+  :<=> (and (state ?s) (exists ?sov (and(sovereignty ?sov)(hasS ?s ?sov)))))
+
+(defrelation hasP ((?s state) (?p people)))
+(defrelation hasB ((?s state) (?b boundary)))
+
+(defconcept sovereignty(?s)
+  :<=> (or(exists ?ss (and(sovereignState ?ss)(hasS ?ss ?s)))
+	(exists ?sys (and(system ?sys)(via ?s ?sys)))))
+
+(defconcept politicalSovereignty(?sov sovereignty)
+  :<=> (or(exists ?ns (and(nationState ?ns)(hasS ?ns ?sov)))
+	(exists ?ps (and(politicalSystem ?ps)(via ?sov ?ps)))))
+
+(defconcept economicSovereignty(?sov sovereignty)
+  :<=> (exists ?es (and(economicSystem ?es)(via ?sov ?es))))
+
+(defrelation hasS ((?s sovereignState)(?so sovereignty)))
+
+(defconcept nationState(?s)
+  :<=> (and (sovereignState ?s)(exists ?ps (and(politicalSovereignty ?ps)(hasS ?s ?ps)))))
+
+(defrelation via ((?sov sovereignty)(?sys system)))
+
+(defconcept system(?sys)
+  :<=> (exists ?sov (and(sovereignty ?sov)(via ?sov ?sys))))
+
+(defconcept politicalSystem(?psys system)
+  :<=> (exists ?psov (and(politicalSovereignty ?psov)(via ?psov ?psys))))
+
+(defrelation of((?ps politicalSystem) ?p))
+(defrelation by((?ps politicalSystem) ?p))
+(defrelation for((?ps politicalSystem) ?p))
+(defrelation hasRules((?ps politicalSystem) ?r))
+
+(defconcept religiousSystem(system))
+
+(defconcept economicSystem(?esys system)
+  :<=> (exists ?esov (and(economicSovereignty ?esov)(via ?esov ?esys))))
+
+(defconcept anarchy(?psys politicalSystem)
+  :<=> (and (exists ?nr (and (noRules ?nr)(hasRules ?psys ?nr)))
+	(exists ?p (and (people ?p)(for ?psys ?p)))))
+
+(defconcept democracy(?psys politicalSystem)
+  :<=> (exists ?p (and (people ?p)(of ?psys ?p)(for ?psys ?p)(by ?psys ?p))))
+
+(defconcept oligarchy(?psys politicalSystem)
+  :<=> (exists ?sg (and (smallGroup ?sg)(of ?psys ?sg)(by ?psys ?sg))))
+
+(defrelation implements ((?es economicSystem) ?t)) 
+
+(defconcept freeMarket(?esys economicSystem)
+  :<=> (exists ?c (and (capitalism ?c)(implements ?esys ?c))))
+
+(defconcept socialism(?esys economicSystem)
+  :<=> (exists ?m (and (marxism ?m)(implements ?esys ?m))))
+
+(defconcept hybridEconomy (?H)
+  :<=> (and (freeMarket ?H)(socialism ?H)))
+
+(defconcept constitutionalDemocracy(?d democracy)
+  :<=> (exists ?l (and (law ?l)(hasRules ?d ?l))))
+
+(defconcept monarchy(?o oligarchy)
+  :<=> (exists ?rf (and (royalFamily ?rf)(of ?o ?rf)(by ?o ?rf))))
+
+(defconcept family(?o oligarchy)
+  :<=> (and (exists ?p (and (parents ?p)(of ?o ?p)(by ?o ?p)))
+	(exists ?fm (and (familyMembers ?fm)(for ?o ?fm)))))
+
+(defconcept theocracy(?o oligarchy)
+  :<=> (and (exists ?rl (and (religiousLeaders ?rl)(of ?o ?rl)(by ?o ?rl)))
+	(exists ?p (and (people ?p)(for ?o ?p)))))
+
+(defconcept totalitarian(?o oligarchy)
+  :<=> (exists ?pl (and (politicalLeaders ?pl)(of ?o ?pl)(by ?o ?pl)(for ?o ?pl))))
+
+(defconcept goodCommunism (?G)
+  :<=> (and (oligarchy ?G) (socialism ?G)))
+
+(defconcept badCommunism (?B)
+  :<=> (and (and (totalitarian ?B) (socialism ?B))
+	(exists ?cp (and (communistParty ?cp)(of ?B ?cp)(by ?B ?cp)(for ?B ?cp)))))
+
+(defconcept smallGroup (?sg) 
+  :<=> (exists ?o (and (oligarchy ?o)(of ?o ?sg)(by ?o ?sg))))
+
+(defconcept royalFamily(?sg smallGroup)
+  :<=> (exists ?m (and (monarchy ?m)(of ?m ?sg)(by ?m ?sg))))
+
+(defconcept religiousLeaders(?sg smallGroup)
+  :<=> (exists ?t (and (theocracy ?t)(of ?t ?sg)(by ?t ?sg))))
+
+(defconcept parents(?sg smallGroup)
+  :<=> (exists ?f (and (family ?f)(of ?f ?sg)(by ?f ?sg))))
+
+(defconcept dictatorship(?t totalitarian)
+  :<=> (exists ?di (and (dictator ?di)(of ?t ?di)(by ?t ?di)(for ?t ?di))))
+
+(defconcept politicalLeaders (?pl)
+  :<=> (exists ?t (and (totalitarian ?t)(of ?t ?pl)(by ?t ?pl)(for ?t ?pl))))
+
+(defconcept communistParty(?pl politicalLeaders)
+  :<=> (or (exists ?g (and (goodCommunism ?g)(of ?g ?pl)(by ?g ?pl)))
+	(exists ?b (and (badCommunism ?b)(of ?b ?pl)(by ?b ?pl)(for ?b ?pl)))))
+
+; First instance is the United States (US)
+; A nation state that has pol sov via const dem
+; and econ sov via free market
+; Recommended queries:
+; (ask (nationState us)) = TRUE
+; (ask (hasP us)) = TRUE
+; (retrieve all (via USSov ?sov_type)) = USFM, USCD
+
+(assert (capitalism USc))
+(assert (implements USfm USc))
+(assert (law USl))
+(assert (hasRules UScd USl))
+(assert (via USsov USfm))
+(assert (via USsov UScd))
+(assert (hasS US USsov))
+
+; Iran is a theocracy with a hybrid economy
+; Recommended queries:
+; (ask (sovereignState Iran)) = TRUE
+; (ask (nationState Iran)) = UNKNOWN
+; (retrieve all (implements IranEcon ?theories)) = 2 skolems
+; (retrieve all (by IranTheo ?IranLeaders)) = Shahs
+
+(assert (religiousLeaders Shahs))
+(assert (of IranTheo Shahs))
+(assert (by IranTheo Shahs))
+(assert (hybridEconomy IranEcon))
+(assert (hasS Iran IranSov))
+(assert (via IranSov IranEcon))
+
+; Iraq is an anarchy that has transitioned to a
+; free market.
+; Recommended Queries:
+; (ask (freeMarket IraqEcon)) = TRUE
+; (ask (nationState Iraq)) = TRUE
+; (ask (hybridEconomy IraqEcon)) = UNKNOWN
+
+(assert (people IraqP))
+(assert (noRules IraqNR))
+(assert (and (hasRules IraqA IraqNR)(for IraqA IraqP)))
+(assert (via IraqSov IraqA))
+(assert (hasS Iraq IraqSov))
+(assert (capitalism IraqC))
+(assert (implements IraqEcon IraqC))
+
+
+; Group queries:
+; (retrieve all (nationState ?ns)) = US, IRAQ (Iran is not a nation state)
+; (retrieve all (oligarchy ?o)) = IRAN (and a skolem)
+
+(classify-relations PL-USER true)
+(classify-instances PL-USER true)
+(process-definitions)
